@@ -11,9 +11,9 @@ from ble_manager import BLEManager, BLEPeer
 from ui import TerminalUI
 
 async def main():
-    parser = argparse.ArgumentParser(description="Terminal Talk - BitChat Compatible Bluetooth Mesh Terminal")
+    parser = argparse.ArgumentParser(description="Bluetooth Talk - P2P Bluetooth Mesh Terminal Chat")
     parser.add_argument("--name", "-n", type=str, help="Set your chat nickname")
-    parser.add_argument("--channel", "-c", type=str, default="#general", help="Join default IRC channel")
+    parser.add_argument("--channel", "-c", type=str, default="#general", help="Join default channel")
     parser.add_argument("--share", "-s", action="store_true", help="Show share download link/command")
     args = parser.parse_args()
 
@@ -62,7 +62,7 @@ async def main():
         return
 
     # Add welcome message
-    ui.add_message("BitChat", f"Welcome to BitChat Mesh TUI! Joined channel {args.channel}.", time.strftime("%H:%M:%S"), channel=args.channel)
+    ui.add_message("Bluetooth Talk", f"Welcome to Bluetooth Talk Mesh TUI! Joined channel {args.channel}.", time.strftime("%H:%M:%S"), channel=args.channel)
     ui.render_snapshot()
 
     session = PromptSession()
@@ -87,7 +87,7 @@ async def main():
                         if not target_chan.startswith("#"):
                             target_chan = f"#{target_chan}"
                         ui.set_channel(target_chan, target_chan)
-                        ui.add_message("BitChat", f"Joined channel {target_chan}", time.strftime("%H:%M:%S"), channel=target_chan)
+                        ui.add_message("Bluetooth Talk", f"Joined channel {target_chan}", time.strftime("%H:%M:%S"), channel=target_chan)
                     elif cmd == "/msg" and len(cmd_parts) > 2:
                         target_name = cmd_parts[1]
                         msg_text = cmd_parts[2]
@@ -100,7 +100,7 @@ async def main():
                         
                         ts = time.strftime("%H:%M:%S")
                         ui.add_message(nickname, msg_text, ts, is_self=True, channel="DM", target_name=target_name, hops=1)
-                        ui.update_status(f"Sending BitChat DM to {target_name}...")
+                        ui.update_status(f"Sending Direct Message to {target_name}...")
                         ui.render_snapshot()
 
                         await ble.send_message(msg_text, target_id=target_id, target_name=target_name, channel="DM")
@@ -110,7 +110,7 @@ async def main():
                         panic_wipe_data()
                         ui.messages.clear()
                         ui.peers.clear()
-                        ui.add_message("BitChat", "⚠️ PANIC MODE: All local logs and contacts wiped!", time.strftime("%H:%M:%S"))
+                        ui.add_message("Bluetooth Talk", "⚠️ PANIC MODE: All local logs and contacts wiped!", time.strftime("%H:%M:%S"))
                         ui.update_status("Panic Mode Triggered: Data Wiped")
 
                     elif cmd == "/nick" and len(cmd_parts) > 1:
@@ -120,25 +120,25 @@ async def main():
                         save_config(config)
                         ble.nickname = new_nick
                         ui.nickname = new_nick
-                        ui.add_message("BitChat", f"Nickname changed to <{new_nick}>", time.strftime("%H:%M:%S"))
+                        ui.add_message("Bluetooth Talk", f"Nickname changed to <{new_nick}>", time.strftime("%H:%M:%S"))
                     elif cmd in ["/who", "/peers"]:
                         peer_info = [f"<{p.name}> ({p.peer_type} {p.rssi}dBm)" for p in ble.peers.values()]
                         summary = ", ".join(peer_info) if peer_info else "No active peers in direct range."
-                        ui.add_message("BitChat", f"Active Mesh Peers: {summary}", time.strftime("%H:%M:%S"))
+                        ui.add_message("Bluetooth Talk", f"Active Mesh Peers: {summary}", time.strftime("%H:%M:%S"))
                     elif cmd == "/contacts":
                         contacts = load_contacts()
                         info_lines = [f"<{c['nickname']}> (ID: {c['device_id']})" for c in contacts.values()]
                         summary = ", ".join(info_lines) if info_lines else "No contacts history."
-                        ui.add_message("BitChat", f"Saved Contacts: {summary}", time.strftime("%H:%M:%S"))
+                        ui.add_message("Bluetooth Talk", f"Saved Contacts: {summary}", time.strftime("%H:%M:%S"))
                     elif cmd == "/share":
                         from share import print_share_info
                         print_share_info()
                     elif cmd == "/help":
-                        ui.add_message("BitChat", "Commands: /join <#chan>, /msg <user> <msg>, /who, /panic, /nick <name>, /quit", time.strftime("%H:%M:%S"))
+                        ui.add_message("Bluetooth Talk", "Commands: /join <#chan>, /msg <user> <msg>, /who, /panic, /nick <name>, /quit", time.strftime("%H:%M:%S"))
                     elif cmd == "/clear":
                         ui.messages.clear()
                     else:
-                        ui.add_message("BitChat", f"Unknown command: {cmd}", time.strftime("%H:%M:%S"))
+                        ui.add_message("Bluetooth Talk", f"Unknown command: {cmd}", time.strftime("%H:%M:%S"))
                 else:
                     # Send message to active IRC channel or DM
                     ts = time.strftime("%H:%M:%S")

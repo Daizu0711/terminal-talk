@@ -25,7 +25,7 @@ class TerminalUI:
         self.active_channel = "#general"  # "#general", "#mesh", or target_device_id
         self.active_target_name = "#general"
         self.joined_channels: Set[str] = {"#general", "#mesh", "#dev"}
-        self.status_msg = "BitChat BLE Mesh Active"
+        self.status_msg = "Bluetooth Talk Mesh Active"
         self.live: Optional[Live] = None
 
     def set_channel(self, channel_or_target: str, target_name: str):
@@ -64,9 +64,9 @@ class TerminalUI:
             Layout(name="sidebar", ratio=1)
         )
 
-        # Header - BitChat IRC Style
+        # Header - Bluetooth Talk Style
         header_text = Text()
-        header_text.append("⚡ BITCHAT MESH ", style="bold bright_cyan")
+        header_text.append("⚡ BLUETOOTH TALK ", style="bold bright_cyan")
         header_text.append("│ ", style="dim")
         header_text.append(f"Nick: <{self.nickname}> ", style="bold bright_green")
         header_text.append("│ ", style="dim")
@@ -75,7 +75,7 @@ class TerminalUI:
         header_text.append("│ ", style="dim")
         header_text.append(f"Peers: {len(self.peers)} ", style="bold bright_blue")
         
-        header_panel = Panel(header_text, border_style="cyan", title="Off-Grid Peer-to-Peer Terminal")
+        header_panel = Panel(header_text, border_style="cyan", title="Off-Grid Peer-to-Peer Bluetooth Mesh Terminal")
         layout["header"].update(header_panel)
 
         # Chat Feed - Classic IRC Log Format (<User> Message)

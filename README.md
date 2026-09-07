@@ -1,12 +1,12 @@
-# ⚡ BitChat Terminal (Terminal Talk)
+# ⚡ Bluetooth Talk
 
-**BitChat Terminal** は、インターネットやサーバーを一切介さず、Bluetooth Low Energy (BLE) メッシュネットワークおよびローカルネットワーク上で動作する分散型P2Pターミナルチャットアプリケーションです。（BitChat / bitchat-tui 思想に準拠）
+**Bluetooth Talk** は、インターネットやサーバーを一切介さず、Bluetooth Low Energy (BLE) メッシュネットワークおよびローカルネットワーク上で動作するオフグリッド型P2Pターミナルチャットアプリケーションです。
 
 ---
 
 ## ✨ 主な機能
 
-1. **IRCスタイル チャンネル機能 (`#mesh`, `#general`, `#dev`)**:
+1. **チャンネル機能 (`#mesh`, `#general`, `#dev`)**:
    - `/join #mesh` コマンドで自由にオフグリッドのトピックチャンネルを作成・参加。
 2. **7ホップ BLE メッシュマルチホップ中継**:
    - 電波の届かない遠くのユーザーへも、中継ノードが自動バケツリレーでパケットを転送。
@@ -26,12 +26,12 @@ curl -fsSL https://raw.githubusercontent.com/Daizu0711/terminal-talk/main/instal
 
 ---
 
-## 💬 BitChat IRC コマンド一覧
+## 💬 コマンド一覧
 
 | コマンド | 説明 |
 | :--- | :--- |
 | `メッセージ` | 現在参加中のチャンネルまたはDM相手へ送信 |
-| `/join <#チャンネル>` | 指定したIRCチャンネルに参加・切替（例: `/join #mesh`） |
+| `/join <#チャンネル>` | 指定したチャンネルに参加・切替（例: `/join #mesh`） |
 | `/msg <ユーザー> <本文>` | チャンネルを切替えずに特定ユーザーへダイレクトメッセージ送信 |
 | `/who` または `/peers` | メッシュ接続中のアクティブピア一覧と電波強度(RSSI)を表示 |
 | `/panic` | **パニックモード**: ローカルのメッセージ履歴と連絡先を即時完全消去 |
