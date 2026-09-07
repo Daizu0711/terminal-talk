@@ -95,7 +95,7 @@ else
     fi
     
     mkdir -p "$APP_DIR"
-    FILES=("main.py" "ble_manager.py" "ui.py" "config.py" "share.py" "requirements.txt" "README.md")
+    FILES=("main.py" "ble_manager.py" "ui.py" "config.py" "share.py" "requirements.txt" "terminal-talk.spec" "README.md")
     for file in "${FILES[@]}"; do
         echo -e "Fetching $file..."
         curl -fsSL "$BASE_URL/$file" -o "$APP_DIR/$file" || {
@@ -117,13 +117,25 @@ echo -e "${BLUE}[4/5] Installing Bluetooth & TUI dependencies...${NC}"
 echo -e "${BLUE}[5/5] Registering 'terminal-talk' launcher binary...${NC}"
 
 LAUNCHER="$INSTALL_DIR/terminal-talk"
-cat << 'EOF' > "$LAUNCHER"
+if [ "$OS" = "Darwin" ]; then
+    echo -e "${BLUE}Building macOS app bundle with Bluetooth permission metadata...${NC}"
+    "$VENV_DIR/bin/pyinstaller" --clean --noconfirm "$APP_DIR/terminal-talk.spec" --distpath "$APP_DIR/dist" --workpath "$APP_DIR/build"
+    APP_EXECUTABLE="$APP_DIR/dist/terminal-talk.app/Contents/MacOS/terminal-talk"
+else
+    APP_EXECUTABLE=""
+fi
+
+if [ "$OS" = "Darwin" ]; then
+    cat << EOF > "$LAUNCHER"
 #!/bin/bash
-INSTALL_DIR="$HOME/.terminal-talk"
-APP_DIR="$INSTALL_DIR/app"
-VENV_DIR="$INSTALL_DIR/venv"
-exec "$VENV_DIR/bin/python3" "$APP_DIR/main.py" "$@"
+exec "$APP_EXECUTABLE" "\$@"
 EOF
+else
+    cat << EOF > "$LAUNCHER"
+#!/bin/bash
+exec "$VENV_DIR/bin/python3" "$APP_DIR/main.py" "\$@"
+EOF
+fi
 
 chmod +x "$LAUNCHER"
 
