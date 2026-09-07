@@ -153,16 +153,10 @@ echo -e "${GREEN}🎉 Terminal Talk installed successfully!${NC}"
 echo -e "You can now run: ${CYAN}terminal-talk${NC}"
 echo -e "${GREEN}=====================================================${NC}\n"
 
-# Launch application safely
-echo -e "${YELLOW}Starting Terminal Talk...${NC}"
-if [ -t 0 ]; then
+# Launch application safely if running directly from terminal
+if [ -t 0 ] && [ -f "${BASH_SOURCE[0]}" ] && [ "${BASH_SOURCE[0]}" != "$0" ]; then
+    echo -e "${YELLOW}Starting Bluetooth Talk...${NC}"
     "$LAUNCHER"
 else
-    # Piped execution via curl | bash: reconnect stdin to /dev/tty
-    if [ -e /dev/tty ]; then
-        exec < /dev/tty
-        "$LAUNCHER"
-    else
-        echo -e "Setup complete! Please open a new terminal window and run: ${CYAN}terminal-talk${NC}"
-    fi
+    echo -e "${GREEN}Setup complete! Run ${CYAN}terminal-talk${NC} ${GREEN}to start chatting.${NC}\n"
 fi
