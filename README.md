@@ -23,7 +23,7 @@
 
 ```bash
 # GitHub経由でワンライナーインストール
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/terminal-talk/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Daizu0711/terminal-talk/main/install.sh | bash
 ```
 
 またはローカルで実行：

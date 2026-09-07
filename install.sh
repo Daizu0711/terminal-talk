@@ -87,7 +87,7 @@ else
     # Remote execution fallback: download repository archive or files
     echo -e "${BLUE}Downloading application components from GitHub...${NC}"
     # Default repository URL (can be customized by setting REPO_RAW_URL environment variable)
-    REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/sota/terminal-talk/main}"
+    REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/Daizu0711/terminal-talk/main}"
     
     mkdir -p "$APP_DIR"
     FILES=("main.py" "ble_manager.py" "ui.py" "config.py" "share.py" "requirements.txt" "README.md")
