@@ -6,7 +6,7 @@ import time
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from config import load_config, save_config, load_contacts, panic_wipe_data
+from config import load_config, save_config, load_contacts, panic_wipe_data, prompt_nickname_if_needed
 from ble_manager import BLEManager, BLEPeer
 from ui import TerminalUI
 
@@ -17,10 +17,15 @@ async def main():
     parser.add_argument("--share", "-s", action="store_true", help="Show share download link/command")
     args = parser.parse_args()
 
+    # Load configuration & prompt for nickname if first time
     config = load_config()
     if args.name:
         config["nickname"] = args.name
+        config["custom_nickname_set"] = True
         save_config(config)
+    else:
+        # Prompt interactively if custom nickname has not been set yet
+        config = prompt_nickname_if_needed(config)
 
     nickname = config["nickname"]
     device_id = config["device_id"]
@@ -61,8 +66,8 @@ async def main():
         print_share_info()
         return
 
-    # Add welcome message
-    ui.add_message("Bluetooth Talk", f"Welcome to Bluetooth Talk Mesh TUI! Joined channel {args.channel}.", time.strftime("%H:%M:%S"), channel=args.channel)
+    # Welcome message
+    ui.add_message("Bluetooth Talk", f"Welcome <{nickname}>! Joined channel {args.channel}.", time.strftime("%H:%M:%S"), channel=args.channel)
     ui.render_snapshot()
 
     session = PromptSession()
@@ -88,16 +93,36 @@ async def main():
                             target_chan = f"#{target_chan}"
                         ui.set_channel(target_chan, target_chan)
                         ui.add_message("Bluetooth Talk", f"Joined channel {target_chan}", time.strftime("%H:%M:%S"), channel=target_chan)
+                    
+                    elif cmd == "/chat" and len(cmd_parts) > 1:
+                        target_arg = cmd_parts[1]
+                        target_name = target_arg
+                        target_id = target_arg
+
+                        # Handle numbered peer index shortcut e.g. /chat 1
+                        if target_arg.isdigit():
+                            idx = int(target_arg) - 1
+                            if 0 <= idx < len(ui.peers):
+                                peer = ui.peers[idx]
+                                target_name = peer.name
+                                target_id = peer.device_id
+
+                        ui.set_channel(target_id, target_name)
+                        ui.add_message("Bluetooth Talk", f"Switched DM channel to '{target_name}'", time.strftime("%H:%M:%S"), channel="DM", target_name=target_name)
+
                     elif cmd == "/msg" and len(cmd_parts) > 2:
-                        target_name = cmd_parts[1]
+                        target_arg = cmd_parts[1]
                         msg_text = cmd_parts[2]
-                        contacts = load_contacts()
-                        target_id = target_name
-                        for dev_id, info in contacts.items():
-                            if info.get("nickname").lower() == target_name.lower():
-                                target_id = dev_id
-                                break
-                        
+                        target_name = target_arg
+                        target_id = target_arg
+
+                        if target_arg.isdigit():
+                            idx = int(target_arg) - 1
+                            if 0 <= idx < len(ui.peers):
+                                peer = ui.peers[idx]
+                                target_name = peer.name
+                                target_id = peer.device_id
+
                         ts = time.strftime("%H:%M:%S")
                         ui.add_message(nickname, msg_text, ts, is_self=True, channel="DM", target_name=target_name, hops=1)
                         ui.update_status(f"Sending Direct Message to {target_name}...")
@@ -117,30 +142,37 @@ async def main():
                         new_nick = cmd_parts[1]
                         nickname = new_nick
                         config["nickname"] = new_nick
+                        config["custom_nickname_set"] = True
                         save_config(config)
                         ble.nickname = new_nick
                         ui.nickname = new_nick
                         ui.add_message("Bluetooth Talk", f"Nickname changed to <{new_nick}>", time.strftime("%H:%M:%S"))
+                    
                     elif cmd in ["/who", "/peers"]:
                         peer_info = [f"<{p.name}> ({p.peer_type} {p.rssi}dBm)" for p in ble.peers.values()]
                         summary = ", ".join(peer_info) if peer_info else "No active peers in direct range."
                         ui.add_message("Bluetooth Talk", f"Active Mesh Peers: {summary}", time.strftime("%H:%M:%S"))
+                    
                     elif cmd == "/contacts":
                         contacts = load_contacts()
                         info_lines = [f"<{c['nickname']}> (ID: {c['device_id']})" for c in contacts.values()]
                         summary = ", ".join(info_lines) if info_lines else "No contacts history."
                         ui.add_message("Bluetooth Talk", f"Saved Contacts: {summary}", time.strftime("%H:%M:%S"))
+                    
                     elif cmd == "/share":
                         from share import print_share_info
                         print_share_info()
+                    
                     elif cmd == "/help":
-                        ui.add_message("Bluetooth Talk", "Commands: /join <#chan>, /msg <user> <msg>, /who, /panic, /nick <name>, /quit", time.strftime("%H:%M:%S"))
+                        ui.add_message("Bluetooth Talk", "Shortcuts: /chat <#>, /join <#chan>, /msg <user> <text>, /who, /panic, /nick <name>, /quit", time.strftime("%H:%M:%S"))
+                    
                     elif cmd == "/clear":
                         ui.messages.clear()
+                    
                     else:
                         ui.add_message("Bluetooth Talk", f"Unknown command: {cmd}", time.strftime("%H:%M:%S"))
                 else:
-                    # Send message to active IRC channel or DM
+                    # Send message to active channel or DM
                     ts = time.strftime("%H:%M:%S")
                     target_chan = ui.active_target_name
 
@@ -169,7 +201,7 @@ async def main():
                 break
 
     ble.stop()
-    print("\nGoodbye from BitChat Mesh!")
+    print("\nGoodbye from Bluetooth Talk!")
 
 if __name__ == "__main__":
     try:

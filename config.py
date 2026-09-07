@@ -8,12 +8,12 @@ CONFIG_DIR = os.path.expanduser("~/.terminal-talk")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 CONTACTS_FILE = os.path.join(CONFIG_DIR, "contacts.json")
 
-# 128-bit custom Service & Characteristic UUIDs for Terminal Talk (BitChat Protocol compatible)
 SERVICE_UUID = "9A2F3B8C-4D1E-4F2A-9B8C-1D2E3F4A5B6C"
 CHARACTERISTIC_UUID_MSG = "9A2F3B8C-4D1E-4F2A-9B8C-1D2E3F4A5B6D"
 
 DEFAULT_CONFIG = {
     "nickname": f"User-{socket.gethostname().split('.')[0]}",
+    "custom_nickname_set": False,
     "device_id": str(uuid.uuid4())[:8],
     "default_channel": "#general",
     "service_uuid": SERVICE_UUID,
@@ -43,6 +43,24 @@ def save_config(config: dict):
     ensure_config_dir()
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
+
+def prompt_nickname_if_needed(config: dict) -> dict:
+    """Interactively prompts user for nickname on first run if custom nickname is not yet set."""
+    if not config.get("custom_nickname_set", False):
+        default_name = config.get("nickname", "User")
+        print("\n=====================================================")
+        print("🎉 Welcome to Bluetooth Talk Mesh Terminal!")
+        print("=====================================================")
+        try:
+            user_choice = input(f"Enter your display nickname (press Enter for '{default_name}'): ").strip()
+            if user_choice:
+                config["nickname"] = user_choice
+            config["custom_nickname_set"] = True
+            save_config(config)
+            print(f"✓ Nickname set to: <{config['nickname']}>\n")
+        except (KeyboardInterrupt, EOFError):
+            pass
+    return config
 
 def load_contacts() -> dict:
     ensure_config_dir()
