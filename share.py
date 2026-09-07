@@ -3,7 +3,7 @@ import os
 import socket
 import socketserver
 import sys
-import threading
+import time
 
 def get_local_ip():
     try:
@@ -15,38 +15,33 @@ def get_local_ip():
     except Exception:
         return "localhost"
 
-def start_local_share_server(port=8080):
+def run_share_server(port=8080):
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    
+    ip = get_local_ip()
+
     class QuietHandler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=script_dir, **kwargs)
         def log_message(self, format, *args):
-            pass
+            print(f"[{time.strftime('%H:%M:%S')}] Shared file with friend: {args[0]}")
+
+    print("\n=====================================================")
+    print("🚀 Share Terminal Talk Server Running!\n")
+    print("Send one of these commands to your friend's terminal:\n")
+    print(f"📌 Local Wi-Fi Network Command:")
+    print(f"   curl -fsSL http://{ip}:{port}/install.sh | bash\n")
+    print(f"📌 GitHub Command (After pushing to GitHub):")
+    print(f"   curl -fsSL https://raw.githubusercontent.com/Daizu0711/terminal-talk/main/install.sh | bash")
+    print("\n=====================================================")
+    print("🌐 Sharing server is LIVE. Press Ctrl+C to stop.\n")
 
     try:
-        httpd = socketserver.TCPServer(("", port), QuietHandler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        return port
-    except Exception:
-        return None
-
-def print_share_info():
-    ip = get_local_ip()
-    port = start_local_share_server(8080)
-    
-    print("\n=====================================================")
-    print("🚀 Share Terminal Talk with nearby friends!\n")
-    print("Copy and send one of the following commands to your friend:")
-    
-    if port:
-        print(f"\n📌 If on the same Wi-Fi / Local Network:")
-        print(f"   curl -fsSL http://{ip}:{port}/install.sh | bash")
-
-    print(f"\n📌 If sharing via GitHub / Direct File:")
-    print("   curl -fsSL https://raw.githubusercontent.com/Daizu0711/terminal-talk/main/install.sh | bash")
-    print("\n=====================================================\n")
+        with socketserver.TCPServer(("", port), QuietHandler) as httpd:
+            httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nSharing server stopped.")
+    except Exception as e:
+        print(f"\nServer error: {e}")
 
 if __name__ == "__main__":
-    print_share_info()
+    run_share_server()
