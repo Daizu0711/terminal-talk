@@ -85,16 +85,21 @@ if [ -f "$SCRIPT_DIR/main.py" ]; then
     cp -R "$SCRIPT_DIR/"* "$APP_DIR/"
 else
     # Remote execution fallback: download repository archive or files
-    echo -e "${BLUE}Downloading application components from GitHub...${NC}"
-    # Default repository URL (can be customized by setting REPO_RAW_URL environment variable)
-    REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/Daizu0711/terminal-talk/main}"
+    echo -e "${BLUE}Downloading application components...${NC}"
+    
+    # Auto-detect if downloaded from local HTTP server or fallback to GitHub
+    if [ -n "$HTTP_SHARE_URL" ]; then
+        BASE_URL="$HTTP_SHARE_URL"
+    else
+        BASE_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/Daizu0711/terminal-talk/main}"
+    fi
     
     mkdir -p "$APP_DIR"
     FILES=("main.py" "ble_manager.py" "ui.py" "config.py" "share.py" "requirements.txt" "README.md")
     for file in "${FILES[@]}"; do
         echo -e "Fetching $file..."
-        curl -fsSL "$REPO_RAW_URL/$file" -o "$APP_DIR/$file" || {
-            echo -e "${RED}Failed to download $file from $REPO_RAW_URL${NC}"
+        curl -fsSL "$BASE_URL/$file" -o "$APP_DIR/$file" || {
+            echo -e "${RED}Warning: Could not fetch $file from $BASE_URL${NC}"
         }
     done
 fi
