@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import platform
+import socket
 import sys
 import time
 import uuid
@@ -12,12 +13,15 @@ from config import SERVICE_UUID, CHARACTERISTIC_UUID_MSG, update_contact
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("ble_manager")
 
+UDP_PORT = 9999
+
 class BLEPeer:
-    def __init__(self, address: str, name: str, device_id: str, rssi: int):
+    def __init__(self, address: str, name: str, device_id: str, rssi: int, peer_type: str = "BLE"):
         self.address = address
         self.name = name
         self.device_id = device_id
         self.rssi = rssi
+        self.peer_type = peer_type # "BLE" or "UDP"
         self.last_seen = time.time()
 
 class BLEManager:
@@ -33,20 +37,89 @@ class BLEManager:
         self.is_advertising = False
         self.peripheral_manager = None
         self._loop = None
+        self.udp_socket = None
 
     def start(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
         self.is_scanning = True
+        
+        # Start BLE Discovery Loop
         asyncio.create_task(self._scan_loop())
         
-        # Start BLE Peripheral (GATT Server) for receiving incoming messages
+        # Start UDP LAN Fallback Loop (for instant Wi-Fi/P2P discovery)
+        self._start_udp_listener()
+        asyncio.create_task(self._udp_heartbeat_loop())
+        
+        # Start BLE Peripheral (GATT Server) on macOS
         if sys.platform == "darwin":
             self._start_macos_peripheral()
-        else:
-            logger.info("Non-macOS platform detected: Running BLE Central mode.")
+
+    def _start_udp_listener(self):
+        """Sets up UDP Broadcast listener for local network P2P discovery."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.bind(("", UDP_PORT))
+            sock.setblocking(False)
+            self.udp_socket = sock
+            
+            # Add to async loop
+            if self._loop:
+                self._loop.add_reader(self.udp_socket.fileno(), self._on_udp_data_received)
+        except Exception as e:
+            logger.debug(f"UDP listener init error: {e}")
+
+    def _on_udp_data_received(self):
+        try:
+            data, addr = self.udp_socket.recvfrom(4096)
+            payload = json.loads(data.decode('utf-8'))
+            msg_type = payload.get("type")
+            
+            if msg_type == "HEARTBEAT":
+                dev_id = payload.get("device_id")
+                name = payload.get("nickname")
+                if dev_id and dev_id != self.device_id:
+                    current_time = time.time()
+                    updated = False
+                    key = f"UDP-{dev_id}"
+                    if key not in self.peers:
+                        self.peers[key] = BLEPeer(addr[0], name, dev_id, rssi=0, peer_type="LAN")
+                        updated = True
+                    else:
+                        peer = self.peers[key]
+                        peer.name = name
+                        peer.last_seen = current_time
+                        updated = True
+                    
+                    update_contact(dev_id, name, addr[0])
+                    if updated and self.on_peers_changed:
+                        self.on_peers_changed(list(self.peers.values()))
+            
+            elif msg_type == "CHAT":
+                packet = payload.get("packet", {})
+                self.handle_incoming_packet(packet)
+
+        except Exception:
+            pass
+
+    async def _udp_heartbeat_loop(self):
+        """Periodically broadcasts UDP heartbeat on local network."""
+        while self.is_scanning:
+            if self.udp_socket:
+                try:
+                    msg = json.dumps({
+                        "type": "HEARTBEAT",
+                        "device_id": self.device_id,
+                        "nickname": self.nickname
+                    }).encode('utf-8')
+                    self.udp_socket.sendto(msg, ("<broadcast>", UDP_PORT))
+                except Exception:
+                    pass
+            await asyncio.sleep(2.0)
 
     def _start_macos_peripheral(self):
-        """Starts PyObjC CoreBluetooth CBPeripheralManager to advertise and receive messages on macOS."""
+        """Starts CoreBluetooth CBPeripheralManager to advertise and receive messages on macOS."""
         try:
             import CoreBluetooth
             from Foundation import NSObject, CBUUID
@@ -98,12 +171,10 @@ class BLEManager:
         """Processes incoming packet, handles mesh deduplication, local delivery, and multi-hop relaying."""
         packet_id = packet.get("packet_id")
         if not packet_id or packet_id in self.seen_packets:
-            return # Ignore duplicate packet
+            return
 
-        # Mark packet as processed
         self.seen_packets.add(packet_id)
         if len(self.seen_packets) > 2000:
-            # Clean up old packet IDs
             self.seen_packets = set(list(self.seen_packets)[-1000:])
 
         source_id = packet.get("source_id", "Unknown")
@@ -112,31 +183,36 @@ class BLEManager:
         ttl = packet.get("ttl", 5)
         visited = packet.get("visited", [])
 
-        # Update contact history
         update_contact(source_id, source_name)
 
-        # Check delivery
         is_for_me = (target_id == self.device_id)
         is_broadcast = (target_id == "BROADCAST")
 
         if is_for_me or is_broadcast:
-            # Deliver to local UI
             if self.on_message:
                 self.on_message(packet)
 
-        # Multi-Hop Relay Logic
         if ttl > 1 and self.device_id not in visited and (is_broadcast or not is_for_me):
-            # Relay to adjacent BLE peers
             relay_packet = packet.copy()
             relay_packet["ttl"] = ttl - 1
             relay_packet["visited"] = visited + [self.device_id]
             asyncio.create_task(self._relay_packet(relay_packet))
 
     async def _relay_packet(self, packet: dict):
-        """Forwards packet to adjacent peers in range."""
+        """Forwards packet to adjacent peers via BLE and UDP LAN."""
         payload_bytes = json.dumps(packet).encode('utf-8')
+        
+        # 1. Send via UDP LAN Broadcast
+        if self.udp_socket:
+            try:
+                udp_payload = json.dumps({"type": "CHAT", "packet": packet}).encode('utf-8')
+                self.udp_socket.sendto(udp_payload, ("<broadcast>", UDP_PORT))
+            except Exception:
+                pass
+
+        # 2. Send via BLE
         for addr, peer in list(self.peers.items()):
-            if peer.device_id not in packet.get("visited", []):
+            if peer.peer_type == "BLE" and peer.device_id not in packet.get("visited", []):
                 try:
                     async with BleakClient(addr, timeout=4.0) as client:
                         if client.is_connected:
@@ -148,6 +224,7 @@ class BLEManager:
         """Continuous BLE scanning task."""
         while self.is_scanning:
             try:
+                # Scan for BLE peripherals
                 devices = await BleakScanner.discover(timeout=4.0, return_adv=True)
                 current_time = time.time()
                 updated = False
@@ -162,7 +239,7 @@ class BLEManager:
                         dev_id = parts[2] if len(parts) >= 3 else dev.address[:8]
 
                         if dev.address not in self.peers:
-                            self.peers[dev.address] = BLEPeer(dev.address, display_name, dev_id, adv.rssi)
+                            self.peers[dev.address] = BLEPeer(dev.address, display_name, dev_id, adv.rssi, peer_type="BLE")
                             updated = True
                         else:
                             peer = self.peers[dev.address]
@@ -174,8 +251,8 @@ class BLEManager:
                         
                         update_contact(dev_id, display_name, dev.address)
 
-                # Clean up stale peers (> 30s)
-                stale_keys = [addr for addr, peer in self.peers.items() if current_time - peer.last_seen > 30]
+                # Clean up stale peers (> 20s)
+                stale_keys = [addr for addr, peer in self.peers.items() if current_time - peer.last_seen > 20]
                 for addr in stale_keys:
                     del self.peers[addr]
                     updated = True
@@ -189,7 +266,7 @@ class BLEManager:
             await asyncio.sleep(2.0)
 
     async def send_message(self, text: str, target_id: str = "BROADCAST", target_name: str = "ALL") -> bool:
-        """Sends a mesh packet (Group or DM) to reachable BLE peers."""
+        """Sends a mesh packet (Group or DM) via UDP LAN and BLE."""
         packet_id = str(uuid.uuid4())[:8]
         packet = {
             "packet_id": packet_id,
@@ -204,25 +281,38 @@ class BLEManager:
         }
         self.seen_packets.add(packet_id)
 
-        payload_bytes = json.dumps(packet).encode('utf-8')
+        success = False
 
-        if not self.peers:
-            return False
-
-        success_count = 0
-        for addr, peer in list(self.peers.items()):
+        # 1. Send via UDP LAN Broadcast
+        if self.udp_socket:
             try:
-                async with BleakClient(addr, timeout=5.0) as client:
-                    if client.is_connected:
-                        await client.write_gatt_char(CHARACTERISTIC_UUID_MSG, payload_bytes, response=True)
-                        success_count += 1
+                udp_payload = json.dumps({"type": "CHAT", "packet": packet}).encode('utf-8')
+                self.udp_socket.sendto(udp_payload, ("<broadcast>", UDP_PORT))
+                success = True
             except Exception as e:
-                logger.debug(f"Failed to send to peer {addr}: {e}")
+                logger.debug(f"UDP send error: {e}")
 
-        return success_count > 0
+        # 2. Send via BLE Direct Connections
+        payload_bytes = json.dumps(packet).encode('utf-8')
+        for addr, peer in list(self.peers.items()):
+            if peer.peer_type == "BLE":
+                try:
+                    async with BleakClient(addr, timeout=4.0) as client:
+                        if client.is_connected:
+                            await client.write_gatt_char(CHARACTERISTIC_UUID_MSG, payload_bytes, response=True)
+                            success = True
+                except Exception as e:
+                    logger.debug(f"BLE send error: {e}")
+
+        return success
 
     def stop(self):
         self.is_scanning = False
+        if self.udp_socket:
+            try:
+                self.udp_socket.close()
+            except Exception:
+                pass
         if self.peripheral_manager:
             try:
                 self.peripheral_manager.stopAdvertising()
