@@ -76,9 +76,9 @@ class TerminalUI:
 
         # Chat Feed
         chat_table = Table(show_header=False, box=None, expand=True)
-        chat_table.add_column("Time", style="dim width=8")
-        chat_table.add_column("Target/Hops", style="dim cyan width=14")
-        chat_table.add_column("Sender", style="bold width=15")
+        chat_table.add_column("Time", style="dim", width=8)
+        chat_table.add_column("Target/Hops", style="dim cyan", width=14)
+        chat_table.add_column("Sender", style="bold", width=15)
         chat_table.add_column("Message", style="white")
 
         # Filter messages for Group Chat or DM
