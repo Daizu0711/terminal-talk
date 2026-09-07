@@ -90,7 +90,7 @@ async def main():
                         ui.set_channel(target_chan, target_chan)
                         ui.add_message("Bluetooth Talk", f"Joined channel {target_chan}", time.strftime("%H:%M:%S"), channel=target_chan)
 
-                    elif cmd == "/connect" and len(cmd_parts) > 1:
+                    elif cmd in ["/connect", "/add"] and len(cmd_parts) > 1:
                         target_arg = cmd_parts[1]
                         target_name = target_arg
 
@@ -99,12 +99,16 @@ async def main():
                             if 0 <= idx < len(ui.peers):
                                 target_name = ui.peers[idx].name
 
-                        ui.update_status(f"Initiating GATT connection to {target_name}...")
+                        ui.update_status(f"Initiating P2P connection to {target_name}...")
                         ui.render_snapshot()
 
-                        connected = await ble.connect_peer_manual(target_name)
-                        if connected:
-                            ui.update_status(f"GATT connection established with {target_name}!")
+                        connected_ble = await ble.connect_peer_manual(target_name)
+                        # Use manual UDP discovery only when the target is not a discovered BLE peer.
+                        added_ip = False
+                        if not connected_ble and target_arg == target_name:
+                            added_ip = await ble.add_manual_peer(target_arg)
+                        if added_ip or connected_ble:
+                            ui.update_status(f"P2P connection established with {target_name}!")
                         else:
                             ui.update_status(f"Connecting to {target_name} in background pool...")
 
