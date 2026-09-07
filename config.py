@@ -8,13 +8,14 @@ CONFIG_DIR = os.path.expanduser("~/.terminal-talk")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 CONTACTS_FILE = os.path.join(CONFIG_DIR, "contacts.json")
 
-# 128-bit custom Service & Characteristic UUIDs for Terminal Talk
+# 128-bit custom Service & Characteristic UUIDs for Terminal Talk (BitChat Protocol compatible)
 SERVICE_UUID = "9A2F3B8C-4D1E-4F2A-9B8C-1D2E3F4A5B6C"
 CHARACTERISTIC_UUID_MSG = "9A2F3B8C-4D1E-4F2A-9B8C-1D2E3F4A5B6D"
 
 DEFAULT_CONFIG = {
     "nickname": f"User-{socket.gethostname().split('.')[0]}",
     "device_id": str(uuid.uuid4())[:8],
+    "default_channel": "#general",
     "service_uuid": SERVICE_UUID,
     "char_uuid": CHARACTERISTIC_UUID_MSG
 }
@@ -67,3 +68,14 @@ def update_contact(device_id: str, nickname: str, address: str = ""):
         "last_seen": time.strftime("%Y-%m-%d %H:%M:%S")
     }
     save_contacts(contacts)
+
+def panic_wipe_data():
+    """BitChat Panic Mode: Wipes all local configuration, message history, and saved contacts."""
+    try:
+        if os.path.exists(CONFIG_FILE):
+            os.remove(CONFIG_FILE)
+        if os.path.exists(CONTACTS_FILE):
+            os.remove(CONTACTS_FILE)
+        return True
+    except Exception:
+        return False

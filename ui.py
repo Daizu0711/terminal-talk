@@ -2,7 +2,7 @@ import asyncio
 import os
 import sys
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from rich.console import Console
 from rich.layout import Layout
 from rich.panel import Panel
@@ -22,21 +22,25 @@ class TerminalUI:
         self.nickname = nickname
         self.messages = []
         self.peers: List[BLEPeer] = []
-        self.active_channel = "BROADCAST"  # "BROADCAST" or target_device_id
-        self.active_target_name = "Group Chat"
-        self.status_msg = "Bluetooth Mesh Active"
+        self.active_channel = "#general"  # "#general", "#mesh", or target_device_id
+        self.active_target_name = "#general"
+        self.joined_channels: Set[str] = {"#general", "#mesh", "#dev"}
+        self.status_msg = "BitChat BLE Mesh Active"
         self.live: Optional[Live] = None
 
-    def set_channel(self, target_id: str, target_name: str):
-        self.active_channel = target_id
+    def set_channel(self, channel_or_target: str, target_name: str):
+        self.active_channel = channel_or_target
         self.active_target_name = target_name
+        if target_name.startswith("#"):
+            self.joined_channels.add(target_name)
 
-    def add_message(self, sender: str, text: str, timestamp: str, is_self: bool = False, target_name: str = "ALL", hops: int = 1):
+    def add_message(self, sender: str, text: str, timestamp: str, is_self: bool = False, channel: str = "#general", target_name: str = "ALL", hops: int = 1):
         self.messages.append({
             "sender": sender,
             "text": text,
             "timestamp": timestamp,
             "is_self": is_self,
+            "channel": channel,
             "target_name": target_name,
             "hops": hops
         })
@@ -60,84 +64,77 @@ class TerminalUI:
             Layout(name="sidebar", ratio=1)
         )
 
-        # Header
+        # Header - BitChat IRC Style
         header_text = Text()
-        header_text.append("📡 TERMINAL TALK ", style="bold cyan")
+        header_text.append("⚡ BITCHAT MESH ", style="bold bright_cyan")
         header_text.append("│ ", style="dim")
-        header_text.append(f"User: {self.nickname} ", style="bold green")
+        header_text.append(f"Nick: <{self.nickname}> ", style="bold bright_green")
         header_text.append("│ ", style="dim")
-        channel_style = "bold yellow" if self.active_channel == "BROADCAST" else "bold magenta"
-        header_text.append(f"Channel: [{self.active_target_name}] ", style=channel_style)
+        channel_style = "bold bright_yellow" if self.active_target_name.startswith("#") else "bold bright_magenta"
+        header_text.append(f"Channel: {self.active_target_name} ", style=channel_style)
         header_text.append("│ ", style="dim")
-        header_text.append(f"Direct Peers: {len(self.peers)} ", style="bold blue")
+        header_text.append(f"Peers: {len(self.peers)} ", style="bold bright_blue")
         
-        header_panel = Panel(header_text, border_style="cyan", title="Bluetooth Mesh Chat")
+        header_panel = Panel(header_text, border_style="cyan", title="Off-Grid Peer-to-Peer Terminal")
         layout["header"].update(header_panel)
 
-        # Chat Feed
+        # Chat Feed - Classic IRC Log Format (<User> Message)
         chat_table = Table(show_header=False, box=None, expand=True)
         chat_table.add_column("Time", style="dim", width=8)
-        chat_table.add_column("Target/Hops", style="dim cyan", width=14)
-        chat_table.add_column("Sender", style="bold", width=15)
+        chat_table.add_column("Chan/Hops", style="dim cyan", width=14)
+        chat_table.add_column("User", style="bold", width=15)
         chat_table.add_column("Message", style="white")
 
-        # Filter messages for Group Chat or DM
         visible_messages = []
         for msg in self.messages:
-            if self.active_channel == "BROADCAST":
-                if msg["target_name"] == "ALL" or msg["is_self"]:
+            if self.active_target_name.startswith("#"):
+                # Channel mode
+                if msg["channel"] == self.active_target_name or msg["target_name"] == "ALL" or msg["is_self"]:
                     visible_messages.append(msg)
             else:
-                # In DM mode with target_id
+                # Direct Message mode
                 if msg["target_name"] == self.active_target_name or msg["sender"] == self.active_target_name or msg["is_self"]:
                     visible_messages.append(msg)
 
         # Show last 15 messages
         for msg in visible_messages[-15:]:
             sender_style = "bold magenta" if msg["is_self"] else "bold green"
-            sender_display = f"[{msg['sender']}]" if not msg["is_self"] else "[You]"
+            sender_display = f"<{msg['sender']}>" if not msg["is_self"] else "<You>"
             
-            hops_info = "Direct" if msg["hops"] <= 1 else f"Relay ({msg['hops']}H)"
-            type_tag = f"[{msg['target_name'][:5]}│{hops_info}]"
+            hops_info = "Local" if msg["hops"] <= 1 else f"{msg['hops']}H"
+            chan_info = msg["channel"] if msg["channel"].startswith("#") else "DM"
+            tag = f"[{chan_info}│{hops_info}]"
 
             chat_table.add_row(
                 msg["timestamp"],
-                Text(type_tag, style="dim cyan"),
+                Text(tag, style="dim cyan"),
                 Text(sender_display, style=sender_style),
                 msg["text"]
             )
 
-        chat_title = f"💬 {self.active_target_name} Messages"
+        chat_title = f"💬 {self.active_target_name} Activity"
         chat_panel = Panel(chat_table, title=chat_title, border_style="blue", padding=(0, 1))
         layout["chat"].update(chat_panel)
 
-        # Sidebar (Direct Peers & Contact History)
-        peer_table = Table(show_header=True, box=None, expand=True)
-        peer_table.add_column("Contact", style="bold cyan")
-        peer_table.add_column("Status", style="dim green")
+        # Sidebar - BitChat Channels & Mesh Peers
+        sidebar_table = Table(show_header=True, box=None, expand=True)
+        sidebar_table.add_column("IRC Channels", style="bold yellow")
+        sidebar_table.add_column("Peers", style="bold cyan")
 
-        # Active direct peers
-        direct_dev_ids = set()
-        if self.peers:
-            for p in self.peers:
-                direct_dev_ids.add(p.device_id)
-                signal = f"📶 {p.rssi}dBm" if p.rssi else "Direct"
-                peer_table.add_row(f"{p.name[:10]}", signal)
+        channel_list = list(self.joined_channels)
+        peer_list = [f"{p.name[:8]} ({p.peer_type})" for p in self.peers] if self.peers else ["Scanning..."]
 
-        # Saved contacts history
-        contacts = load_contacts()
-        for dev_id, info in contacts.items():
-            if dev_id not in direct_dev_ids and info.get("nickname") != self.nickname:
-                peer_table.add_row(f"{info['nickname'][:10]}", "Mesh Relay")
+        max_rows = max(len(channel_list), len(peer_list))
+        for i in range(max_rows):
+            ch = channel_list[i] if i < len(channel_list) else ""
+            pr = peer_list[i] if i < len(peer_list) else ""
+            sidebar_table.add_row(ch, pr)
 
-        if not self.peers and not contacts:
-            peer_table.add_row("Scanning...", "-")
-
-        sidebar_panel = Panel(peer_table, title="📇 Contacts & Peers", border_style="magenta")
+        sidebar_panel = Panel(sidebar_table, title="📡 Network & Channels", border_style="magenta")
         layout["sidebar"].update(sidebar_panel)
 
         # Footer Status
-        footer_text = Text(f" Status: {self.status_msg} │ Commands: /group, /chat <user>, /msg <user> <text>, /contacts", style="italic dim yellow")
+        footer_text = Text(f" Status: {self.status_msg} │ IRC Commands: /join <#chan>, /msg <user> <msg>, /who, /panic, /quit", style="italic dim yellow")
         footer_panel = Panel(footer_text, border_style="dim")
         layout["footer"].update(footer_panel)
 

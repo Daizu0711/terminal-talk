@@ -6,13 +6,14 @@ import time
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from config import load_config, save_config, load_contacts
+from config import load_config, save_config, load_contacts, panic_wipe_data
 from ble_manager import BLEManager, BLEPeer
 from ui import TerminalUI
 
 async def main():
-    parser = argparse.ArgumentParser(description="Terminal Talk - Bluetooth P2P Mesh Chat")
+    parser = argparse.ArgumentParser(description="Terminal Talk - BitChat Compatible Bluetooth Mesh Terminal")
     parser.add_argument("--name", "-n", type=str, help="Set your chat nickname")
+    parser.add_argument("--channel", "-c", type=str, default="#general", help="Join default IRC channel")
     parser.add_argument("--share", "-s", action="store_true", help="Show share download link/command")
     args = parser.parse_args()
 
@@ -25,6 +26,7 @@ async def main():
     device_id = config["device_id"]
 
     ui = TerminalUI(nickname)
+    ui.set_channel(args.channel, args.channel)
 
     # Callback when incoming Bluetooth message / mesh packet is received
     def on_message_received(packet: dict):
@@ -32,10 +34,11 @@ async def main():
         text = packet.get("text", "")
         ts = packet.get("timestamp", time.strftime("%H:%M:%S"))
         target_name = packet.get("target_name", "ALL")
+        channel = packet.get("channel", "#general")
         visited = packet.get("visited", [])
         hops = len(visited) if visited else 1
         
-        ui.add_message(sender, text, ts, is_self=False, target_name=target_name, hops=hops)
+        ui.add_message(sender, text, ts, is_self=False, channel=channel, target_name=target_name, hops=hops)
         ui.render_snapshot()
 
     # Callback when Bluetooth peer list updates
@@ -59,7 +62,7 @@ async def main():
         return
 
     # Add welcome message
-    ui.add_message("System", "Welcome to Terminal Talk! Mesh Routing & Direct Messaging Active.", time.strftime("%H:%M:%S"))
+    ui.add_message("BitChat", f"Welcome to BitChat Mesh TUI! Joined channel {args.channel}.", time.strftime("%H:%M:%S"), channel=args.channel)
     ui.render_snapshot()
 
     session = PromptSession()
@@ -67,7 +70,7 @@ async def main():
     with patch_stdout():
         while True:
             try:
-                user_input = await session.prompt_async(f"{nickname} [{ui.active_target_name}] > ")
+                user_input = await session.prompt_async(f"<{nickname}> [{ui.active_target_name}] > ")
                 user_input = user_input.strip()
                 if not user_input:
                     continue
@@ -79,21 +82,12 @@ async def main():
                     if cmd in ["/quit", "/exit"]:
                         ui.update_status("Exiting...")
                         break
-                    elif cmd in ["/group", "/all"]:
-                        ui.set_channel("BROADCAST", "Group Chat")
-                        ui.add_message("System", "Switched channel to Group Chat", time.strftime("%H:%M:%S"))
-                    elif cmd == "/chat" and len(cmd_parts) > 1:
-                        target_name = cmd_parts[1]
-                        contacts = load_contacts()
-                        target_id = None
-                        for dev_id, info in contacts.items():
-                            if info.get("nickname").lower() == target_name.lower():
-                                target_id = dev_id
-                                break
-                        if not target_id:
-                            target_id = target_name # fallback
-                        ui.set_channel(target_id, target_name)
-                        ui.add_message("System", f"Switched DM channel to '{target_name}'", time.strftime("%H:%M:%S"))
+                    elif cmd in ["/join", "/channel"] and len(cmd_parts) > 1:
+                        target_chan = cmd_parts[1]
+                        if not target_chan.startswith("#"):
+                            target_chan = f"#{target_chan}"
+                        ui.set_channel(target_chan, target_chan)
+                        ui.add_message("BitChat", f"Joined channel {target_chan}", time.strftime("%H:%M:%S"), channel=target_chan)
                     elif cmd == "/msg" and len(cmd_parts) > 2:
                         target_name = cmd_parts[1]
                         msg_text = cmd_parts[2]
@@ -105,12 +99,19 @@ async def main():
                                 break
                         
                         ts = time.strftime("%H:%M:%S")
-                        ui.add_message(nickname, msg_text, ts, is_self=True, target_name=target_name, hops=1)
-                        ui.update_status(f"Relaying DM to {target_name}...")
+                        ui.add_message(nickname, msg_text, ts, is_self=True, channel="DM", target_name=target_name, hops=1)
+                        ui.update_status(f"Sending BitChat DM to {target_name}...")
                         ui.render_snapshot()
 
-                        await ble.send_message(msg_text, target_id=target_id, target_name=target_name)
-                        ui.update_status(f"Message sent to mesh for {target_name}")
+                        await ble.send_message(msg_text, target_id=target_id, target_name=target_name, channel="DM")
+                        ui.update_status(f"DM dispatched to mesh for {target_name}")
+
+                    elif cmd == "/panic":
+                        panic_wipe_data()
+                        ui.messages.clear()
+                        ui.peers.clear()
+                        ui.add_message("BitChat", "⚠️ PANIC MODE: All local logs and contacts wiped!", time.strftime("%H:%M:%S"))
+                        ui.update_status("Panic Mode Triggered: Data Wiped")
 
                     elif cmd == "/nick" and len(cmd_parts) > 1:
                         new_nick = cmd_parts[1]
@@ -119,40 +120,48 @@ async def main():
                         save_config(config)
                         ble.nickname = new_nick
                         ui.nickname = new_nick
-                        ui.add_message("System", f"Nickname changed to '{new_nick}'", time.strftime("%H:%M:%S"))
+                        ui.add_message("BitChat", f"Nickname changed to <{new_nick}>", time.strftime("%H:%M:%S"))
+                    elif cmd in ["/who", "/peers"]:
+                        peer_info = [f"<{p.name}> ({p.peer_type} {p.rssi}dBm)" for p in ble.peers.values()]
+                        summary = ", ".join(peer_info) if peer_info else "No active peers in direct range."
+                        ui.add_message("BitChat", f"Active Mesh Peers: {summary}", time.strftime("%H:%M:%S"))
                     elif cmd == "/contacts":
                         contacts = load_contacts()
-                        info_lines = [f"{c['nickname']} (ID: {c['device_id']}, Last: {c['last_seen']})" for c in contacts.values()]
-                        summary = ", ".join(info_lines) if info_lines else "No saved contacts yet."
-                        ui.add_message("System", f"Saved Contacts: {summary}", time.strftime("%H:%M:%S"))
-                    elif cmd == "/peers":
-                        peer_names = [f"{p.name} ({p.device_id} {p.rssi}dBm)" for p in ble.peers.values()]
-                        info = ", ".join(peer_names) if peer_names else "No direct peers found in range."
-                        ui.add_message("System", f"Direct Peers: {info}", time.strftime("%H:%M:%S"))
+                        info_lines = [f"<{c['nickname']}> (ID: {c['device_id']})" for c in contacts.values()]
+                        summary = ", ".join(info_lines) if info_lines else "No contacts history."
+                        ui.add_message("BitChat", f"Saved Contacts: {summary}", time.strftime("%H:%M:%S"))
                     elif cmd == "/share":
                         from share import print_share_info
                         print_share_info()
                     elif cmd == "/help":
-                        ui.add_message("System", "Commands: /group, /chat <user>, /msg <user> <text>, /contacts, /nick <name>, /quit", time.strftime("%H:%M:%S"))
+                        ui.add_message("BitChat", "Commands: /join <#chan>, /msg <user> <msg>, /who, /panic, /nick <name>, /quit", time.strftime("%H:%M:%S"))
                     elif cmd == "/clear":
                         ui.messages.clear()
                     else:
-                        ui.add_message("System", f"Unknown command: {cmd}", time.strftime("%H:%M:%S"))
+                        ui.add_message("BitChat", f"Unknown command: {cmd}", time.strftime("%H:%M:%S"))
                 else:
-                    # Broadcast or DM depending on active channel
+                    # Send message to active IRC channel or DM
                     ts = time.strftime("%H:%M:%S")
-                    target_id = ui.active_channel
-                    target_name = ui.active_target_name
+                    target_chan = ui.active_target_name
 
-                    ui.add_message(nickname, user_input, ts, is_self=True, target_name=target_name, hops=1)
-                    ui.update_status(f"Sending message via Bluetooth Mesh [{target_name}]...")
+                    if target_chan.startswith("#"):
+                        target_id = "BROADCAST"
+                        target_name = "ALL"
+                        chan_tag = target_chan
+                    else:
+                        target_id = ui.active_channel
+                        target_name = ui.active_target_name
+                        chan_tag = "DM"
+
+                    ui.add_message(nickname, user_input, ts, is_self=True, channel=chan_tag, target_name=target_name, hops=1)
+                    ui.update_status(f"Sending message to {target_chan}...")
                     ui.render_snapshot()
 
-                    sent = await ble.send_message(user_input, target_id=target_id, target_name=target_name)
+                    sent = await ble.send_message(user_input, target_id=target_id, target_name=target_name, channel=chan_tag)
                     if sent:
-                        ui.update_status("Message delivered to direct BLE peers!")
+                        ui.update_status(f"Message sent to {target_chan}!")
                     else:
-                        ui.update_status("Relaying message over Mesh (Scanning for relays...)")
+                        ui.update_status("Dispatched over Mesh")
 
                 ui.render_snapshot()
 
@@ -160,7 +169,7 @@ async def main():
                 break
 
     ble.stop()
-    print("\nGoodbye from Terminal Talk!")
+    print("\nGoodbye from BitChat Mesh!")
 
 if __name__ == "__main__":
     try:

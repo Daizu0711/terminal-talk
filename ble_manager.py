@@ -21,7 +21,7 @@ class BLEPeer:
         self.name = name
         self.device_id = device_id
         self.rssi = rssi
-        self.peer_type = peer_type # "BLE" or "UDP"
+        self.peer_type = peer_type # "BLE" or "LAN"
         self.last_seen = time.time()
 
 class BLEManager:
@@ -46,7 +46,7 @@ class BLEManager:
         # Start BLE Discovery Loop
         asyncio.create_task(self._scan_loop())
         
-        # Start UDP LAN Fallback Loop (for instant Wi-Fi/P2P discovery)
+        # Start UDP LAN Fallback Loop (for instant P2P discovery)
         self._start_udp_listener()
         asyncio.create_task(self._udp_heartbeat_loop())
         
@@ -64,7 +64,6 @@ class BLEManager:
             sock.setblocking(False)
             self.udp_socket = sock
             
-            # Add to async loop
             if self._loop:
                 self._loop.add_reader(self.udp_socket.fileno(), self._on_udp_data_received)
         except Exception as e:
@@ -168,7 +167,7 @@ class BLEManager:
             logger.warning(f"Could not start macOS GATT Peripheral: {e}")
 
     def handle_incoming_packet(self, packet: dict):
-        """Processes incoming packet, handles mesh deduplication, local delivery, and multi-hop relaying."""
+        """Processes incoming packet, handles BitChat mesh deduplication, local delivery, and multi-hop relaying."""
         packet_id = packet.get("packet_id")
         if not packet_id or packet_id in self.seen_packets:
             return
@@ -180,7 +179,7 @@ class BLEManager:
         source_id = packet.get("source_id", "Unknown")
         source_name = packet.get("source_name", "Unknown")
         target_id = packet.get("target_id", "BROADCAST")
-        ttl = packet.get("ttl", 5)
+        ttl = packet.get("ttl", 7) # Default BitChat 7 hops
         visited = packet.get("visited", [])
 
         update_contact(source_id, source_name)
@@ -192,6 +191,7 @@ class BLEManager:
             if self.on_message:
                 self.on_message(packet)
 
+        # Multi-Hop Mesh Relay
         if ttl > 1 and self.device_id not in visited and (is_broadcast or not is_for_me):
             relay_packet = packet.copy()
             relay_packet["ttl"] = ttl - 1
@@ -200,8 +200,6 @@ class BLEManager:
 
     async def _relay_packet(self, packet: dict):
         """Forwards packet to adjacent peers via BLE and UDP LAN."""
-        payload_bytes = json.dumps(packet).encode('utf-8')
-        
         # 1. Send via UDP LAN Broadcast
         if self.udp_socket:
             try:
@@ -211,6 +209,7 @@ class BLEManager:
                 pass
 
         # 2. Send via BLE
+        payload_bytes = json.dumps(packet).encode('utf-8')
         for addr, peer in list(self.peers.items()):
             if peer.peer_type == "BLE" and peer.device_id not in packet.get("visited", []):
                 try:
@@ -224,7 +223,6 @@ class BLEManager:
         """Continuous BLE scanning task."""
         while self.is_scanning:
             try:
-                # Scan for BLE peripherals
                 devices = await BleakScanner.discover(timeout=4.0, return_adv=True)
                 current_time = time.time()
                 updated = False
@@ -251,7 +249,6 @@ class BLEManager:
                         
                         update_contact(dev_id, display_name, dev.address)
 
-                # Clean up stale peers (> 20s)
                 stale_keys = [addr for addr, peer in self.peers.items() if current_time - peer.last_seen > 20]
                 for addr in stale_keys:
                     del self.peers[addr]
@@ -265,8 +262,8 @@ class BLEManager:
             
             await asyncio.sleep(2.0)
 
-    async def send_message(self, text: str, target_id: str = "BROADCAST", target_name: str = "ALL") -> bool:
-        """Sends a mesh packet (Group or DM) via UDP LAN and BLE."""
+    async def send_message(self, text: str, target_id: str = "BROADCAST", target_name: str = "ALL", channel: str = "#general") -> bool:
+        """Sends a BitChat mesh packet (Channel or DM) via UDP LAN and BLE."""
         packet_id = str(uuid.uuid4())[:8]
         packet = {
             "packet_id": packet_id,
@@ -274,7 +271,8 @@ class BLEManager:
             "source_name": self.nickname,
             "target_id": target_id,
             "target_name": target_name,
-            "ttl": 5,
+            "channel": channel,
+            "ttl": 7, # 7 hops default
             "visited": [self.device_id],
             "text": text,
             "timestamp": time.strftime("%H:%M:%S")
