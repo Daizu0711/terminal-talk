@@ -17,17 +17,18 @@ from config import load_contacts
 
 console = Console()
 
-def get_signal_display(rssi: int, peer_type: str) -> str:
-    if peer_type == "LAN":
-        return "🌐 LAN"
-    if rssi == 0:
-        return "📶 Direct"
-    if rssi >= -60:
-        return f"📶 {rssi}dBm (Strong)"
-    elif rssi >= -80:
-        return f"📶 {rssi}dBm (Fair)"
+def get_signal_display(peer: BLEPeer) -> str:
+    if peer.peer_type == "LAN":
+        return "🌐 LAN (Local)"
+    
+    conn_state = "🟢 Connected" if peer.is_connected else ("🟡 Pairing..." if peer.connecting else "⚪ Discovered")
+    
+    if peer.rssi >= -60:
+        return f"{conn_state} 📶 Strong"
+    elif peer.rssi >= -80:
+        return f"{conn_state} 📶 Fair"
     else:
-        return f"📶 {rssi}dBm (Weak)"
+        return f"{conn_state} 📶 Weak"
 
 class TerminalUI:
     def __init__(self, nickname: str):
@@ -46,7 +47,6 @@ class TerminalUI:
         self.active_target_name = target_name
         if target_name.startswith("#"):
             self.joined_channels.add(target_name)
-        # Clear unread count for current channel
         self.unread_counts[target_name] = 0
 
     def add_message(self, sender: str, text: str, timestamp: str, is_self: bool = False, channel: str = "#general", target_name: str = "ALL", hops: int = 1):
@@ -59,7 +59,6 @@ class TerminalUI:
             "target_name": target_name,
             "hops": hops
         })
-        # Track unread count if message belongs to another channel
         msg_chan = channel if channel.startswith("#") else target_name
         if not is_self and msg_chan != self.active_target_name:
             self.unread_counts[msg_chan] = self.unread_counts.get(msg_chan, 0) + 1
@@ -83,14 +82,13 @@ class TerminalUI:
             Layout(name="sidebar", ratio=1)
         )
 
-        # Header - Tabs Bar with Unread Badges
+        # Header - Channel Tabs with Badges
         header_text = Text()
         header_text.append("⚡ BLUETOOTH TALK ", style="bold bright_cyan")
         header_text.append("│ ", style="dim")
         header_text.append(f"<{self.nickname}> ", style="bold bright_green")
         header_text.append("│ Tabs: ", style="dim")
 
-        # Render Channel Tabs
         all_tabs = list(self.joined_channels)
         for tab in all_tabs:
             unread = self.unread_counts.get(tab, 0)
@@ -102,10 +100,9 @@ class TerminalUI:
                 header_text.append(f"[{tab}{badge}] ", style=tab_style)
 
         if not self.active_target_name.startswith("#"):
-            # DM tab active
             header_text.append(f"[DM:{self.active_target_name}] ", style="bold bright_black on magenta")
 
-        header_panel = Panel(header_text, border_style="cyan", title="Off-Grid Peer-to-Peer Terminal")
+        header_panel = Panel(header_text, border_style="cyan", title="Off-Grid Peer-to-Peer Bluetooth Mesh Terminal")
         layout["header"].update(header_panel)
 
         # Chat Log
@@ -143,24 +140,24 @@ class TerminalUI:
         chat_panel = Panel(chat_table, title=chat_title, border_style="blue", padding=(0, 1))
         layout["chat"].update(chat_panel)
 
-        # Sidebar - Numbered Peers & Signal Strength
+        # Sidebar - Numbered Peers & Connection Status
         peer_table = Table(show_header=True, box=None, expand=True)
-        peer_table.add_column("#", style="dim yellow", width=3)
+        peer_table.add_column("#", style="dim yellow", width=2)
         peer_table.add_column("Peer Name", style="bold cyan")
-        peer_table.add_column("Signal", style="dim green")
+        peer_table.add_column("Connection Status", style="dim green")
 
         if not self.peers:
             peer_table.add_row("-", "Scanning...", "-")
         else:
             for idx, p in enumerate(self.peers, 1):
-                sig_str = get_signal_display(p.rssi, p.peer_type)
+                sig_str = get_signal_display(p)
                 peer_table.add_row(str(idx), p.name[:12], sig_str)
 
-        sidebar_panel = Panel(peer_table, title=f"📡 Peers ({len(self.peers)})", border_style="magenta")
+        sidebar_panel = Panel(peer_table, title=f"📡 Connection Mesh ({len(self.peers)})", border_style="magenta")
         layout["sidebar"].update(sidebar_panel)
 
-        # Footer Status & Shortcuts
-        footer_text = Text(f" Status: {self.status_msg} │ Shortcuts: /chat <#>, /join <#chan>, /nick <name>, /panic, /quit", style="italic dim yellow")
+        # Footer Status
+        footer_text = Text(f" Status: {self.status_msg} │ Shortcuts: /chat <#>, /connect <#>, /join <#chan>, /status, /quit", style="italic dim yellow")
         footer_panel = Panel(footer_text, border_style="dim")
         layout["footer"].update(footer_panel)
 

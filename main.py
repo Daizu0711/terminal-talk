@@ -17,14 +17,12 @@ async def main():
     parser.add_argument("--share", "-s", action="store_true", help="Show share download link/command")
     args = parser.parse_args()
 
-    # Load configuration & prompt for nickname if first time
     config = load_config()
     if args.name:
         config["nickname"] = args.name
         config["custom_nickname_set"] = True
         save_config(config)
     else:
-        # Prompt interactively if custom nickname has not been set yet
         config = prompt_nickname_if_needed(config)
 
     nickname = config["nickname"]
@@ -33,7 +31,6 @@ async def main():
     ui = TerminalUI(nickname)
     ui.set_channel(args.channel, args.channel)
 
-    # Callback when incoming Bluetooth message / mesh packet is received
     def on_message_received(packet: dict):
         sender = packet.get("source_name", "Unknown")
         text = packet.get("text", "")
@@ -46,7 +43,6 @@ async def main():
         ui.add_message(sender, text, ts, is_self=False, channel=channel, target_name=target_name, hops=hops)
         ui.render_snapshot()
 
-    # Callback when Bluetooth peer list updates
     def on_peers_changed(peers: list):
         ui.update_peers(peers)
         ui.render_snapshot()
@@ -66,8 +62,7 @@ async def main():
         print_share_info()
         return
 
-    # Welcome message
-    ui.add_message("Bluetooth Talk", f"Welcome <{nickname}>! Joined channel {args.channel}.", time.strftime("%H:%M:%S"), channel=args.channel)
+    ui.add_message("Bluetooth Talk", f"Welcome <{nickname}>! BitChat Auto-Connection Mesh Active.", time.strftime("%H:%M:%S"), channel=args.channel)
     ui.render_snapshot()
 
     session = PromptSession()
@@ -87,19 +82,37 @@ async def main():
                     if cmd in ["/quit", "/exit"]:
                         ui.update_status("Exiting...")
                         break
+
                     elif cmd in ["/join", "/channel"] and len(cmd_parts) > 1:
                         target_chan = cmd_parts[1]
                         if not target_chan.startswith("#"):
                             target_chan = f"#{target_chan}"
                         ui.set_channel(target_chan, target_chan)
                         ui.add_message("Bluetooth Talk", f"Joined channel {target_chan}", time.strftime("%H:%M:%S"), channel=target_chan)
-                    
+
+                    elif cmd == "/connect" and len(cmd_parts) > 1:
+                        target_arg = cmd_parts[1]
+                        target_name = target_arg
+
+                        if target_arg.isdigit():
+                            idx = int(target_arg) - 1
+                            if 0 <= idx < len(ui.peers):
+                                target_name = ui.peers[idx].name
+
+                        ui.update_status(f"Initiating GATT connection to {target_name}...")
+                        ui.render_snapshot()
+
+                        connected = await ble.connect_peer_manual(target_name)
+                        if connected:
+                            ui.update_status(f"GATT connection established with {target_name}!")
+                        else:
+                            ui.update_status(f"Connecting to {target_name} in background pool...")
+
                     elif cmd == "/chat" and len(cmd_parts) > 1:
                         target_arg = cmd_parts[1]
                         target_name = target_arg
                         target_id = target_arg
 
-                        # Handle numbered peer index shortcut e.g. /chat 1
                         if target_arg.isdigit():
                             idx = int(target_arg) - 1
                             if 0 <= idx < len(ui.peers):
@@ -147,32 +160,35 @@ async def main():
                         ble.nickname = new_nick
                         ui.nickname = new_nick
                         ui.add_message("Bluetooth Talk", f"Nickname changed to <{new_nick}>", time.strftime("%H:%M:%S"))
-                    
+
+                    elif cmd == "/status":
+                        conn_count = sum(1 for p in ble.peers.values() if p.is_connected)
+                        ui.add_message("Bluetooth Talk", f"Connection Pool: {conn_count}/{len(ble.peers)} GATT clients connected.", time.strftime("%H:%M:%S"))
+
                     elif cmd in ["/who", "/peers"]:
-                        peer_info = [f"<{p.name}> ({p.peer_type} {p.rssi}dBm)" for p in ble.peers.values()]
+                        peer_info = [f"<{p.name}> ({'Connected' if p.is_connected else 'Discovered'})" for p in ble.peers.values()]
                         summary = ", ".join(peer_info) if peer_info else "No active peers in direct range."
                         ui.add_message("Bluetooth Talk", f"Active Mesh Peers: {summary}", time.strftime("%H:%M:%S"))
-                    
+
                     elif cmd == "/contacts":
                         contacts = load_contacts()
                         info_lines = [f"<{c['nickname']}> (ID: {c['device_id']})" for c in contacts.values()]
                         summary = ", ".join(info_lines) if info_lines else "No contacts history."
                         ui.add_message("Bluetooth Talk", f"Saved Contacts: {summary}", time.strftime("%H:%M:%S"))
-                    
+
                     elif cmd == "/share":
                         from share import print_share_info
                         print_share_info()
-                    
+
                     elif cmd == "/help":
-                        ui.add_message("Bluetooth Talk", "Shortcuts: /chat <#>, /join <#chan>, /msg <user> <text>, /who, /panic, /nick <name>, /quit", time.strftime("%H:%M:%S"))
-                    
+                        ui.add_message("Bluetooth Talk", "Commands: /chat <#>, /connect <#>, /join <#chan>, /msg <user> <text>, /status, /panic, /quit", time.strftime("%H:%M:%S"))
+
                     elif cmd == "/clear":
                         ui.messages.clear()
-                    
+
                     else:
                         ui.add_message("Bluetooth Talk", f"Unknown command: {cmd}", time.strftime("%H:%M:%S"))
                 else:
-                    # Send message to active channel or DM
                     ts = time.strftime("%H:%M:%S")
                     target_chan = ui.active_target_name
 
@@ -191,7 +207,7 @@ async def main():
 
                     sent = await ble.send_message(user_input, target_id=target_id, target_name=target_name, channel=chan_tag)
                     if sent:
-                        ui.update_status(f"Message sent to {target_chan}!")
+                        ui.update_status(f"Message delivered over active connection!")
                     else:
                         ui.update_status("Dispatched over Mesh")
 

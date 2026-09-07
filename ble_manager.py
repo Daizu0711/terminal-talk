@@ -23,6 +23,9 @@ class BLEPeer:
         self.rssi = rssi
         self.peer_type = peer_type # "BLE" or "LAN"
         self.last_seen = time.time()
+        self.client: Optional[BleakClient] = None
+        self.is_connected = False
+        self.connecting = False
 
 class BLEManager:
     def __init__(self, nickname: str, device_id: str, on_message: Callable[[dict], None], on_peers_changed: Callable[[List[BLEPeer]], None]):
@@ -43,14 +46,17 @@ class BLEManager:
         self._loop = loop
         self.is_scanning = True
         
-        # Start BLE Discovery Loop
+        # 1. Start BLE Discovery Loop
         asyncio.create_task(self._scan_loop())
         
-        # Start UDP LAN Fallback Loop (for instant P2P discovery)
+        # 2. Start Persistent BLE Connection Pool Maintainer (BitChat spec)
+        asyncio.create_task(self._connection_pool_loop())
+        
+        # 3. Start UDP LAN Fallback Loop
         self._start_udp_listener()
         asyncio.create_task(self._udp_heartbeat_loop())
         
-        # Start BLE Peripheral (GATT Server) on macOS
+        # 4. Start BLE Peripheral (GATT Server) on macOS
         if sys.platform == "darwin":
             self._start_macos_peripheral()
 
@@ -83,12 +89,15 @@ class BLEManager:
                     updated = False
                     key = f"UDP-{dev_id}"
                     if key not in self.peers:
-                        self.peers[key] = BLEPeer(addr[0], name, dev_id, rssi=0, peer_type="LAN")
+                        peer = BLEPeer(addr[0], name, dev_id, rssi=0, peer_type="LAN")
+                        peer.is_connected = True
+                        self.peers[key] = peer
                         updated = True
                     else:
                         peer = self.peers[key]
                         peer.name = name
                         peer.last_seen = current_time
+                        peer.is_connected = True
                         updated = True
                     
                     update_contact(dev_id, name, addr[0])
@@ -118,7 +127,7 @@ class BLEManager:
             await asyncio.sleep(2.0)
 
     def _start_macos_peripheral(self):
-        """Starts CoreBluetooth CBPeripheralManager to advertise and receive messages on macOS."""
+        """Starts CoreBluetooth CBPeripheralManager to advertise and receive GATT writes on macOS."""
         try:
             import CoreBluetooth
             from Foundation import NSObject, CBUUID
@@ -166,6 +175,56 @@ class BLEManager:
         except Exception as e:
             logger.warning(f"Could not start macOS GATT Peripheral: {e}")
 
+    async def _connection_pool_loop(self):
+        """BitChat Spec: Maintains active GATT connections and subscribes to notifications."""
+        while self.is_scanning:
+            for addr, peer in list(self.peers.items()):
+                if peer.peer_type == "BLE" and not peer.is_connected and not peer.connecting:
+                    asyncio.create_task(self._connect_and_subscribe_peer(peer))
+            await asyncio.sleep(3.0)
+
+    async def _connect_and_subscribe_peer(self, peer: BLEPeer):
+        """Connects BleakClient and subscribes to GATT notifications."""
+        peer.connecting = True
+        try:
+            client = BleakClient(peer.address, timeout=6.0)
+            connected = await client.connect()
+            if connected:
+                peer.client = client
+                peer.is_connected = True
+                peer.connecting = False
+
+                # Notification Callback
+                def notification_handler(sender, data: bytearray):
+                    try:
+                        payload = json.loads(data.decode('utf-8'))
+                        self.handle_incoming_packet(payload)
+                    except Exception:
+                        pass
+
+                try:
+                    await client.start_notify(CHARACTERISTIC_UUID_MSG, notification_handler)
+                except Exception:
+                    pass
+
+                if self.on_peers_changed:
+                    self.on_peers_changed(list(self.peers.values()))
+            else:
+                peer.connecting = False
+        except Exception as e:
+            logger.debug(f"Connection pool error for {peer.name}: {e}")
+            peer.connecting = False
+
+    async def connect_peer_manual(self, peer_identifier: str) -> bool:
+        """Manually trigger connection to a peer by nickname, address, or ID."""
+        for addr, peer in list(self.peers.items()):
+            if peer_identifier.lower() in [peer.name.lower(), peer.device_id.lower(), peer.address.lower()]:
+                if not peer.is_connected:
+                    await self._connect_and_subscribe_peer(peer)
+                    return peer.is_connected
+                return True
+        return False
+
     def handle_incoming_packet(self, packet: dict):
         """Processes incoming packet, handles BitChat mesh deduplication, local delivery, and multi-hop relaying."""
         packet_id = packet.get("packet_id")
@@ -179,7 +238,7 @@ class BLEManager:
         source_id = packet.get("source_id", "Unknown")
         source_name = packet.get("source_name", "Unknown")
         target_id = packet.get("target_id", "BROADCAST")
-        ttl = packet.get("ttl", 7) # Default BitChat 7 hops
+        ttl = packet.get("ttl", 7)
         visited = packet.get("visited", [])
 
         update_contact(source_id, source_name)
@@ -208,14 +267,17 @@ class BLEManager:
             except Exception:
                 pass
 
-        # 2. Send via BLE
+        # 2. Send via BLE Active Connections
         payload_bytes = json.dumps(packet).encode('utf-8')
         for addr, peer in list(self.peers.items()):
             if peer.peer_type == "BLE" and peer.device_id not in packet.get("visited", []):
                 try:
-                    async with BleakClient(addr, timeout=4.0) as client:
-                        if client.is_connected:
-                            await client.write_gatt_char(CHARACTERISTIC_UUID_MSG, payload_bytes, response=True)
+                    if peer.client and peer.is_connected:
+                        await peer.client.write_gatt_char(CHARACTERISTIC_UUID_MSG, payload_bytes, response=True)
+                    else:
+                        async with BleakClient(addr, timeout=3.0) as client:
+                            if client.is_connected:
+                                await client.write_gatt_char(CHARACTERISTIC_UUID_MSG, payload_bytes, response=True)
                 except Exception:
                     pass
 
@@ -259,7 +321,17 @@ class BLEManager:
                         
                         update_contact(dev_id, display_name, dev.address)
 
-                stale_keys = [addr for addr, peer in self.peers.items() if current_time - peer.last_seen > 20]
+                # Clean up stale peers (> 30s)
+                stale_keys = []
+                for addr, peer in self.peers.items():
+                    if current_time - peer.last_seen > 30:
+                        stale_keys.append(addr)
+                        if peer.client:
+                            try:
+                                asyncio.create_task(peer.client.disconnect())
+                            except Exception:
+                                pass
+
                 for addr in stale_keys:
                     del self.peers[addr]
                     updated = True
@@ -273,7 +345,7 @@ class BLEManager:
             await asyncio.sleep(2.0)
 
     async def send_message(self, text: str, target_id: str = "BROADCAST", target_name: str = "ALL", channel: str = "#general") -> bool:
-        """Sends a BitChat mesh packet (Channel or DM) via UDP LAN and BLE."""
+        """Sends a mesh packet (0ms instant delivery over active connection pool)."""
         packet_id = str(uuid.uuid4())[:8]
         packet = {
             "packet_id": packet_id,
@@ -282,7 +354,7 @@ class BLEManager:
             "target_id": target_id,
             "target_name": target_name,
             "channel": channel,
-            "ttl": 7, # 7 hops default
+            "ttl": 7,
             "visited": [self.device_id],
             "text": text,
             "timestamp": time.strftime("%H:%M:%S")
@@ -300,17 +372,21 @@ class BLEManager:
             except Exception as e:
                 logger.debug(f"UDP send error: {e}")
 
-        # 2. Send via BLE Direct Connections
+        # 2. Send via Active BLE Connection Pool (0-ms instant delivery)
         payload_bytes = json.dumps(packet).encode('utf-8')
         for addr, peer in list(self.peers.items()):
             if peer.peer_type == "BLE":
                 try:
-                    async with BleakClient(addr, timeout=4.0) as client:
-                        if client.is_connected:
-                            await client.write_gatt_char(CHARACTERISTIC_UUID_MSG, payload_bytes, response=True)
-                            success = True
+                    if peer.client and peer.is_connected:
+                        await peer.client.write_gatt_char(CHARACTERISTIC_UUID_MSG, payload_bytes, response=True)
+                        success = True
+                    else:
+                        async with BleakClient(addr, timeout=3.0) as client:
+                            if client.is_connected:
+                                await client.write_gatt_char(CHARACTERISTIC_UUID_MSG, payload_bytes, response=True)
+                                success = True
                 except Exception as e:
-                    logger.debug(f"BLE send error: {e}")
+                    logger.debug(f"BLE send error for {peer.name}: {e}")
 
         return success
 
@@ -321,6 +397,12 @@ class BLEManager:
                 self.udp_socket.close()
             except Exception:
                 pass
+        for peer in self.peers.values():
+            if peer.client:
+                try:
+                    asyncio.create_task(peer.client.disconnect())
+                except Exception:
+                    pass
         if self.peripheral_manager:
             try:
                 self.peripheral_manager.stopAdvertising()
