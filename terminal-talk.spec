@@ -36,3 +36,12 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+app = BUNDLE(
+    exe,
+    name='terminal-talk.app',
+    bundle_identifier='com.daizu.terminal-talk',
+    info_plist={
+        'NSBluetoothAlwaysUsageDescription': 'Bluetooth Talk uses Bluetooth Low Energy to discover nearby chat peers and exchange mesh messages.',
+    },
+)
