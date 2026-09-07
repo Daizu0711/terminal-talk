@@ -4,9 +4,6 @@ import socket
 import socketserver
 import sys
 import threading
-from rich.console import Console
-
-console = Console()
 
 def get_local_ip():
     try:
@@ -39,17 +36,17 @@ def print_share_info():
     ip = get_local_ip()
     port = start_local_share_server(8080)
     
-    console.print("\n[bold cyan]=====================================================[/bold cyan]")
-    console.print("[bold yellow]🚀 Share Terminal Talk with nearby friends![/bold yellow]\n")
-    console.print("Copy and send one of the following commands to your friend:")
+    print("\n=====================================================")
+    print("🚀 Share Terminal Talk with nearby friends!\n")
+    print("Copy and send one of the following commands to your friend:")
     
     if port:
-        console.print(f"\n[bold green]📌 If on the same Wi-Fi / Local Network:[/bold green]")
-        console.print(f"   [bold white]curl -fsSL http://{ip}:{port}/install.sh | bash[/bold white]")
+        print(f"\n📌 If on the same Wi-Fi / Local Network:")
+        print(f"   curl -fsSL http://{ip}:{port}/install.sh | bash")
 
-    console.print(f"\n[bold green]📌 If sharing via GitHub / Direct File:[/bold green]")
-    console.print("   [bold white]curl -fsSL https://raw.githubusercontent.com/user/terminal-talk/main/install.sh | bash[/bold white]")
-    console.print("\n[bold cyan]=====================================================[/bold cyan]\n")
+    print(f"\n📌 If sharing via GitHub / Direct File:")
+    print("   curl -fsSL https://raw.githubusercontent.com/Daizu0711/terminal-talk/main/install.sh | bash")
+    print("\n=====================================================\n")
 
 if __name__ == "__main__":
     print_share_info()
