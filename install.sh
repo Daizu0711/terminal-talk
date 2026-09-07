@@ -153,6 +153,16 @@ echo -e "${GREEN}🎉 Terminal Talk installed successfully!${NC}"
 echo -e "You can now run: ${CYAN}terminal-talk${NC}"
 echo -e "${GREEN}=====================================================${NC}\n"
 
-# Prompt to run now
-echo -e "Starting Terminal Talk..."
-"$LAUNCHER"
+# Launch application safely
+echo -e "${YELLOW}Starting Terminal Talk...${NC}"
+if [ -t 0 ]; then
+    "$LAUNCHER"
+else
+    # Piped execution via curl | bash: reconnect stdin to /dev/tty
+    if [ -e /dev/tty ]; then
+        exec < /dev/tty
+        "$LAUNCHER"
+    else
+        echo -e "Setup complete! Please open a new terminal window and run: ${CYAN}terminal-talk${NC}"
+    fi
+fi
