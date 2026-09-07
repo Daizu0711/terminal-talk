@@ -122,7 +122,7 @@ class TerminalUI:
         sidebar_table.add_column("Peers", style="bold cyan")
 
         channel_list = list(self.joined_channels)
-        peer_list = [f"{p.name[:8]} ({p.peer_type})" for p in self.peers] if self.peers else ["Scanning..."]
+        peer_list = [f"{p.name[:14]} ({p.peer_type})" for p in self.peers] if self.peers else ["Scanning..."]
 
         max_rows = max(len(channel_list), len(peer_list))
         for i in range(max_rows):

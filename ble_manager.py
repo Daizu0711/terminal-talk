@@ -144,7 +144,7 @@ class BLEManager:
                         peripheral.addService_(self.service)
                         
                         adv_data = {
-                            CoreBluetooth.CBAdvertisementDataLocalNameKey: f"TT-{manager_self.nickname}-{manager_self.device_id}",
+                            CoreBluetooth.CBAdvertisementDataLocalNameKey: f"TT:{manager_self.nickname}:{manager_self.device_id}",
                             CoreBluetooth.CBAdvertisementDataServiceUUIDsKey: [service_uuid]
                         }
                         peripheral.startAdvertising_(adv_data)
@@ -231,10 +231,20 @@ class BLEManager:
                     has_service = SERVICE_UUID.lower() in [s.lower() for s in adv.service_uuids]
                     name = adv.local_name or dev.name or ""
                     
-                    if has_service or name.startswith("TT-"):
-                        parts = name.split("-")
-                        display_name = parts[1] if len(parts) >= 2 else (name or dev.address[:8])
-                        dev_id = parts[2] if len(parts) >= 3 else dev.address[:8]
+                    if has_service or name.startswith("TT:") or name.startswith("TT-"):
+                        if name.startswith("TT:"):
+                            parts = name.split(":", 2)
+                            display_name = parts[1] if len(parts) >= 2 else name
+                            dev_id = parts[2] if len(parts) >= 3 else dev.address[:8]
+                        elif name.startswith("TT-"):
+                            raw = name[3:]
+                            if "-" in raw:
+                                display_name, dev_id = raw.rsplit("-", 1)
+                            else:
+                                display_name, dev_id = raw, dev.address[:8]
+                        else:
+                            display_name = name if name else f"Peer-{dev.address[:6]}"
+                            dev_id = dev.address[:8]
 
                         if dev.address not in self.peers:
                             self.peers[dev.address] = BLEPeer(dev.address, display_name, dev_id, adv.rssi, peer_type="BLE")
