@@ -105,20 +105,33 @@ class BLEManager:
                     current_time = time.time()
                     updated = False
                     key = f"P2P-{dev_id}"
-                    if key not in self.peers:
-                        peer = BLEPeer(addr[0], name, dev_id, rssi=0, peer_type="P2P")
+                    ble_key = next(
+                        (peer_key for peer_key, peer in self.peers.items()
+                         if peer.peer_type == "BLE" and
+                         (peer.device_id == dev_id or peer.address == addr[0])),
+                        None,
+                    )
+                    if ble_key is not None:
+                        peer = self.peers[ble_key]
+                        peer.name = name or peer.name
+                        peer.last_seen = current_time
+                        peer.is_connected = True
+                        update_contact(dev_id, peer.name, peer.address)
+                        updated = True
+                    elif key not in self.peers:
+                        peer = BLEPeer(addr[0], name or f"Peer-{dev_id}", dev_id, rssi=0, peer_type="P2P")
                         peer.is_connected = True
                         self.peers[key] = peer
                         updated = True
                     else:
                         peer = self.peers[key]
-                        peer.name = name
+                        peer.name = name or peer.name
                         peer.address = addr[0]
                         peer.last_seen = current_time
                         peer.is_connected = True
                         updated = True
                     
-                    update_contact(dev_id, name, addr[0])
+                    update_contact(dev_id, peer.name, addr[0])
                     if updated and self.on_peers_changed:
                         self.on_peers_changed(list(self.peers.values()))
             
@@ -367,13 +380,19 @@ class BLEManager:
                             display_name = target_str if target_str else f"Peer-{dev.address[:6]}"
                             dev_id = dev.address[:8]
 
-                        if dev.address not in self.peers:
+                        existing_key = next(
+                            (peer_key for peer_key, peer in self.peers.items()
+                             if peer.device_id == dev_id),
+                            dev.address,
+                        )
+                        if existing_key not in self.peers:
                             self.peers[dev.address] = BLEPeer(dev.address, display_name, dev_id, adv.rssi, peer_type="BLE")
                             updated = True
                         else:
-                            peer = self.peers[dev.address]
+                            peer = self.peers[existing_key]
                             peer.rssi = adv.rssi
-                            peer.name = display_name
+                            if display_name and not display_name.startswith("Peer-"):
+                                peer.name = display_name
                             peer.device_id = dev_id
                             peer.last_seen = current_time
                             updated = True

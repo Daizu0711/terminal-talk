@@ -147,7 +147,7 @@ class TerminalUI:
         peer_table.add_column("Connection Status", style="dim green")
 
         if not self.peers:
-            peer_table.add_row("-", "Scanning...", "-")
+            peer_table.add_row("-", "No peers found", "Scanning")
         else:
             for idx, p in enumerate(self.peers, 1):
                 sig_str = get_signal_display(p)
